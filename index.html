@@ -38,6 +38,7 @@
     --font-display: 'Bricolage Grotesque', 'Arial Black', sans-serif;
     --font-body: 'Inter Tight', system-ui, -apple-system, sans-serif;
     --ease-out: cubic-bezier(.23, 1, .32, 1);
+    --ease-cinema: cubic-bezier(.16, 1, .3, 1);
     --gutter: clamp(1.5rem, 6vw, 6rem);
   }
 
@@ -72,7 +73,7 @@
   #pixel-veil span {
     background: var(--espresso);
     opacity: 0; transform: scale(.92);
-    transition: opacity .18s var(--ease-out), transform .18s var(--ease-out);
+    transition: opacity .2s var(--ease-cinema), transform .2s var(--ease-cinema);
   }
   #pixel-veil span.on { opacity: 1; transform: scale(1); }
 
@@ -354,8 +355,9 @@
      20x12 blocks. A directional wipe (top-down on scroll down,
      bottom-up on scroll up) with a pixel texture — a random-order
      wipe reads as a glitch; a directional one reads as a cut.
-     Fast: full pass in under half a second.
-     Transform + opacity only; emil-approved easing. */
+     Slow and deliberate: full pass ≈ 0.9s. This is the one
+     authored focal moment; everything else stays quiet.
+     Transform + opacity only; natural-deceleration easing. */
   var veil = document.getElementById("pixel-veil");
   var COLS = 20, ROWS = 12, cells = [];
   for (var r = 0; r < ROWS; r++) {
@@ -375,14 +377,14 @@
       return a._jitter - b._jitter;
     });
   }
-  var COVER_EACH = 0.7, REVEAL_EACH = 0.7;   // ms per cell: full sweep ≈ 170ms
+  var COVER_EACH = 1.2, REVEAL_EACH = 1.0;   // ms per cell: sweeps ≈ 290/240ms
   function cover(dir) {
     return new Promise(function (resolve) {
       orderedCells(dir || 1).forEach(function (el, idx) {
         el.style.transitionDelay = (idx * COVER_EACH) + "ms";
         el.classList.add("on");
       });
-      setTimeout(resolve, 240 + 180 + 30);
+      setTimeout(resolve, 300 + 200 + 30);
     });
   }
   function reveal(dir) {
@@ -394,18 +396,18 @@
       setTimeout(function () {
         cells.forEach(function (el) { el.style.transitionDelay = "0ms"; });
         resolve();
-      }, 240 + 180);
+      }, 260 + 200);
     });
   }
   var lastDissolve = 0, dissolving = false;
   function dissolve(dir) {
     if (reduceMotion || dissolving) return Promise.resolve();
     var now = Date.now();
-    if (now - lastDissolve < 1200) return Promise.resolve();  // cooldown
+    if (now - lastDissolve < 1400) return Promise.resolve();  // cooldown
     dissolving = true; lastDissolve = now;
     dir = dir || 1;
     return cover(dir)
-      .then(function () { return new Promise(function (r) { setTimeout(r, 60); }); })
+      .then(function () { return new Promise(function (r) { setTimeout(r, 90); }); })
       .then(function () { return reveal(dir); })
       .then(function () { dissolving = false; });
   }
@@ -496,13 +498,26 @@
   if (!reduceMotion && window.gsap && window.ScrollTrigger) {
     gsap.registerPlugin(ScrollTrigger);
 
-    /* Chapter reveals: copy rises into frame as each act arrives.
-       Motivated: storytelling — text enters in sequence with the scene. */
-    document.querySelectorAll('.act:not(#hero) .copy').forEach(function (copy) {
-      gsap.from(copy.children, {
-        y: 28, opacity: 0, duration: .9, ease: 'power2.out', stagger: .09,
+    /* Chapter reveals: each act enters in its own direction with a
+       subtle focus-pull (blur resolving to sharp) — cinematic and
+       physical, never the same entrance twice.
+       Motivated: storytelling — text arrives the way its scene is composed. */
+    var revealConfigs = [
+      { sel: '#act-seed .copy',    from: { x: -40, opacity: 0, filter: 'blur(8px)' } },
+      { sel: '#act-harvest .copy', from: { x: 40, opacity: 0, filter: 'blur(8px)' } },
+      { sel: '#act-bean .copy',    from: { y: 48, opacity: 0, filter: 'blur(8px)' } },
+      { sel: '#act-cup .copy',     from: { y: 36, scale: 0.98, opacity: 0, filter: 'blur(10px)' } }
+    ];
+    revealConfigs.forEach(function (cfg) {
+      var copy = document.querySelector(cfg.sel);
+      if (!copy) return;
+      var vars = {
+        duration: 1.15, ease: 'expo.out', stagger: 0.12,
+        clearProps: 'filter',
         scrollTrigger: { trigger: copy, start: 'top 78%', once: true }
-      });
+      };
+      for (var k in cfg.from) vars[k] = cfg.from[k];
+      gsap.from(copy.children, vars);
     });
 
     /* Numeral drift: chapter numbers float against the scroll.
@@ -536,10 +551,10 @@
       scrollTrigger: { trigger: 'footer', start: 'top 88%', once: true }
     });
 
-    /* Hero title entrance — plays after the preloader dissolves. */
+    /* Hero title entrance — plays after the preloader dissolves. Slow and weighted. */
     window.VOXEL_BREW.heroEntrance = function () {
-      gsap.from('#hero .copy > *', { y: 44, opacity: 0, duration: 1.1, ease: 'power3.out', stagger: .12 });
-      gsap.from('#hero .scroll-cue', { opacity: 0, duration: .8, delay: .7 });
+      gsap.from('#hero .copy > *', { y: 48, opacity: 0, duration: 1.4, ease: 'expo.out', stagger: 0.14 });
+      gsap.from('#hero .scroll-cue', { opacity: 0, duration: 1, delay: 0.9 });
     };
 
     /* Desktop-only pins: the opening shot lingers; the still harvest
