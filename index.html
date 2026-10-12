@@ -247,8 +247,7 @@
   <section id="film" aria-label="The film: seed to cup in one shot">
     <div class="stage">
       <video id="film-video" muted playsinline preload="auto"
-             poster="assets/img/poster.jpg"
-             src="assets/video/film-720.mp4"></video>
+             poster="assets/img/poster.jpg"></video>
       <div class="shade"></div>
 
       <!-- Intro title card -->
@@ -378,6 +377,13 @@
   var video = document.getElementById("film-video");
   var progressEl = document.getElementById("progress");
   var DUR = 10;   // the single 10-second shot
+  /* Adaptive quality: the 1080p master on desktop (every real pixel the
+     footage has), the lighter 720p on phones where scrub smoothness
+     matters more than pixels the eye can't resolve. */
+  var filmSrc = window.innerWidth >= 1024
+    ? "assets/video/film-1080p.mp4"
+    : "assets/video/film-720.mp4";
+  video.src = filmSrc;
   video.addEventListener("progress", updateBuffer);
   video.addEventListener("canplaythrough", markReady);
   video.addEventListener("loadedmetadata", updateBuffer);
