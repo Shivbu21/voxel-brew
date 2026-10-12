@@ -87,8 +87,7 @@
     text-indent: .28em;
   }
   #preloader .bar { width: 10rem; height: 2px; background: var(--line); overflow: hidden; }
-  #preloader .bar i { display: block; height: 100%; width: 40%; background: var(--amber); animation: loadslide 1.1s var(--ease-out) infinite; }
-  @keyframes loadslide { 0% { transform: translateX(-100%);} 100% { transform: translateX(350%);} }
+  #preloader .bar i { display: block; height: 100%; width: 0%; background: var(--amber); transition: width .3s var(--ease-out); }
   #preloader .skip {
     font-size: .75rem; font-weight: 600;
     letter-spacing: .24em; text-transform: uppercase; color: var(--smoke);
@@ -240,8 +239,8 @@
 <!-- Preloader: title card -->
 <div id="preloader" role="button" tabindex="0" aria-label="Enter the film">
   <div class="brandmark">VOXEL BREW</div>
-  <div class="bar" aria-hidden="true"><i></i></div>
-  <div class="skip">tap to enter</div>
+  <div class="bar" aria-hidden="true"><i id="loadfill"></i></div>
+  <div class="skip" id="skip-label">loading the film&hellip;</div>
 </div>
 
 <main>
@@ -249,7 +248,7 @@
     <div class="stage">
       <video id="film-video" muted playsinline preload="auto"
              poster="assets/img/poster.jpg"
-             src="assets/video/hero-arc.mp4"></video>
+             src="assets/video/film-720.mp4"></video>
       <div class="shade"></div>
 
       <!-- Intro title card -->
@@ -333,9 +332,14 @@
   var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   var hasGSAP = window.gsap && window.ScrollTrigger;
 
-  /* ============ Preloader ============ */
+  /* ============ Preloader: waits for the film to buffer ============
+     Scrubbing into an unbuffered video stalls — the classic scrub lag.
+     The card stays until the film is genuinely ready, with real progress. */
   var preloader = document.getElementById("preloader");
+  var loadfill = document.getElementById("loadfill");
+  var skipLabel = document.getElementById("skip-label");
   var dismissed = false;
+  var filmReady = false;
   function dismissPreloader() {
     if (dismissed) return;
     dismissed = true;
@@ -347,16 +351,37 @@
     preloader.style.pointerEvents = "none";
     setTimeout(function () { preloader.remove(); }, 850);
   }
+  function markReady() {
+    if (filmReady) return;
+    filmReady = true;
+    loadfill.style.width = "100%";
+    skipLabel.textContent = "tap to enter";
+    dismissPreloader();   // auto-enter: the film is ready
+  }
+  function updateBuffer() {
+    if (filmReady) return;
+    try {
+      var d = video.duration || DUR, total = 0, b = video.buffered;
+      for (var i = 0; i < b.length; i++) total += b[i].end(i) - b[i].start(i);
+      var pct = Math.min(total / d, 1);
+      loadfill.style.width = Math.round(pct * 100) + "%";
+      if (pct >= 0.95) markReady();
+    } catch (e) {}
+  }
   preloader.addEventListener("click", dismissPreloader);
   preloader.addEventListener("keydown", function (e) {
     if (e.key === "Enter" || e.key === " ") dismissPreloader();
   });
-  setTimeout(dismissPreloader, 6000);   // never trap anyone
+  setTimeout(dismissPreloader, 15000);   // absolute fallback: never trap anyone
 
   /* ============ The film ============ */
   var video = document.getElementById("film-video");
   var progressEl = document.getElementById("progress");
   var DUR = 10;   // the single 10-second shot
+  video.addEventListener("progress", updateBuffer);
+  video.addEventListener("canplaythrough", markReady);
+  video.addEventListener("loadedmetadata", updateBuffer);
+  try { video.load(); } catch (e) {}
   var chapters = Array.prototype.slice.call(document.querySelectorAll(".chapter"))
     .map(function (el) {
       return {
@@ -396,23 +421,29 @@
         } else { a = 1; }
       }
       if (a <= 0.001) {
-        if (el.style.visibility !== "hidden") {
+        if (ch._vis !== false) {
           el.style.visibility = "hidden";
           el.style.opacity = "0";
+          ch._vis = false;
         }
       } else {
-        el.style.visibility = "visible";
-        el.style.opacity = a.toFixed(3);
-        el.style.transform = "translate3d(" + x.toFixed(1) + "px," + y.toFixed(1) + "px,0)";
-        el.style.filter = blur > 0.3 ? "blur(" + blur.toFixed(1) + "px)" : "";
+        var op = a.toFixed(3);
+        var tr = "translate3d(" + x.toFixed(1) + "px," + y.toFixed(1) + "px,0)";
+        var fl = blur > 0.3 ? "blur(" + blur.toFixed(1) + "px)" : "";
+        if (ch._vis !== true || ch._op !== op || ch._tr !== tr || ch._fl !== fl) {
+          el.style.visibility = "visible";
+          el.style.opacity = op;
+          el.style.transform = tr;
+          el.style.filter = fl;
+          ch._vis = true; ch._op = op; ch._tr = tr; ch._fl = fl;
+        }
       }
     }
   }
 
   if (!reduceMotion && hasGSAP) {
     gsap.registerPlugin(ScrollTrigger);
-    var scrubTarget = 0, scrubCur = 0, videoReady = false;
-    video.addEventListener("canplay", function () { videoReady = true; });
+    var scrubTarget = 0, scrubCur = 0, frame = 0;
 
     ScrollTrigger.create({
       trigger: "#film",
@@ -423,10 +454,15 @@
     });
 
     (function tick() {
+      frame++;
       scrubCur += (scrubTarget - scrubCur) * 0.14;
       if (Math.abs(scrubTarget - scrubCur) < 0.0004) scrubCur = scrubTarget;
-      var t = scrubCur * DUR;
-      if (videoReady && Math.abs(video.currentTime - t) > 0.03) {
+      /* Quantize to 30fps and seek at most every other frame —
+         constant 60fps seeking is what makes scrub feel laggy.
+         Big jumps (fast scrolls) still seek immediately. */
+      var t = Math.round(scrubCur * DUR * 30) / 30;
+      var drift = Math.abs(video.currentTime - t);
+      if (filmReady && drift > 0.035 && (drift > 0.3 || frame % 2 === 0)) {
         try { video.currentTime = t; } catch (e) {}
       }
       renderChapters(scrubCur);
