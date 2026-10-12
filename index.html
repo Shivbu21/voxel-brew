@@ -72,7 +72,7 @@
   #pixel-veil span {
     background: var(--espresso);
     opacity: 0; transform: scale(.92);
-    transition: opacity .22s var(--ease-out), transform .22s var(--ease-out);
+    transition: opacity .18s var(--ease-out), transform .18s var(--ease-out);
   }
   #pixel-veil span.on { opacity: 1; transform: scale(1); }
 
@@ -351,53 +351,62 @@
   var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   /* ============ Pixel veil: the signature transition ============
-     20x12 blocks. Cover staggers in, holds, staggers out.
-     Transform + opacity only; emil-approved easing; ~700ms total. */
+     20x12 blocks. A directional wipe (top-down on scroll down,
+     bottom-up on scroll up) with a pixel texture — a random-order
+     wipe reads as a glitch; a directional one reads as a cut.
+     Fast: full pass in under half a second.
+     Transform + opacity only; emil-approved easing. */
   var veil = document.getElementById("pixel-veil");
   var COLS = 20, ROWS = 12, cells = [];
-  for (var i = 0; i < COLS * ROWS; i++) {
-    var s = document.createElement("span");
-    veil.appendChild(s);
-    cells.push(s);
-  }
-  function shuffled() {
-    var a = cells.slice();
-    for (var i = a.length - 1; i > 0; i--) {
-      var j = Math.floor(Math.random() * (i + 1));
-      var t = a[i]; a[i] = a[j]; a[j] = t;
+  for (var r = 0; r < ROWS; r++) {
+    for (var c = 0; c < COLS; c++) {
+      var s = document.createElement("span");
+      s._row = r;
+      s._jitter = Math.random();   // fixed jitter: pixel texture inside the sweep
+      veil.appendChild(s);
+      cells.push(s);
     }
-    return a;
   }
-  function cover() {
-    return new Promise(function (resolve) {
-      shuffled().forEach(function (el, idx) {
-        el.style.transitionDelay = (idx * 1.1) + "ms";   // ~260ms cascade
-        el.classList.add("on");
-      });
-      setTimeout(resolve, 260 + 220 + 60);
+  function orderedCells(dir) {
+    return cells.slice().sort(function (a, b) {
+      var ra = dir === 1 ? a._row : -a._row;
+      var rb = dir === 1 ? b._row : -b._row;
+      if (ra !== rb) return ra - rb;
+      return a._jitter - b._jitter;
     });
   }
-  function reveal() {
+  var COVER_EACH = 0.7, REVEAL_EACH = 0.7;   // ms per cell: full sweep ≈ 170ms
+  function cover(dir) {
     return new Promise(function (resolve) {
-      shuffled().forEach(function (el, idx) {
-        el.style.transitionDelay = (idx * 0.9) + "ms";
+      orderedCells(dir || 1).forEach(function (el, idx) {
+        el.style.transitionDelay = (idx * COVER_EACH) + "ms";
+        el.classList.add("on");
+      });
+      setTimeout(resolve, 240 + 180 + 30);
+    });
+  }
+  function reveal(dir) {
+    return new Promise(function (resolve) {
+      orderedCells(dir || 1).forEach(function (el, idx) {
+        el.style.transitionDelay = (idx * REVEAL_EACH) + "ms";
         el.classList.remove("on");
       });
       setTimeout(function () {
         cells.forEach(function (el) { el.style.transitionDelay = "0ms"; });
         resolve();
-      }, 220 + 220);
+      }, 240 + 180);
     });
   }
   var lastDissolve = 0, dissolving = false;
-  function dissolve() {
+  function dissolve(dir) {
     if (reduceMotion || dissolving) return Promise.resolve();
     var now = Date.now();
     if (now - lastDissolve < 1200) return Promise.resolve();  // cooldown
     dissolving = true; lastDissolve = now;
-    return cover()
-      .then(function () { return new Promise(function (r) { setTimeout(r, 110); }); })
-      .then(reveal)
+    dir = dir || 1;
+    return cover(dir)
+      .then(function () { return new Promise(function (r) { setTimeout(r, 60); }); })
+      .then(function () { return reveal(dir); })
       .then(function () { dissolving = false; });
   }
 
@@ -452,6 +461,7 @@
 
   /* ============ Act transitions: dissolve on chapter change + pause offscreen video ============ */
   var acts = document.querySelectorAll(".act");
+  var actOrder = Array.prototype.slice.call(acts);
   var currentAct = null, firstSeen = true;
   if ("IntersectionObserver" in window) {
     var watcher = new IntersectionObserver(function (entries) {
@@ -460,9 +470,10 @@
         if (entry.isIntersecting && entry.intersectionRatio >= 0.5) {
           if (v && !v.getAttribute("data-src")) v.play().catch(function () {});
           if (currentAct !== entry.target) {
+            var dir = currentAct && actOrder.indexOf(entry.target) < actOrder.indexOf(currentAct) ? -1 : 1;
             currentAct = entry.target;
             if (firstSeen) { firstSeen = false; }
-            else { dissolve(); }
+            else { dissolve(dir); }
           }
         } else if (v && !entry.isIntersecting) {
           v.pause();   // rest offscreen videos: cheap perf win
