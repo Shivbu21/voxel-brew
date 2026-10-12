@@ -12,7 +12,7 @@
      The scroll is the timeline: pinned stage, scrubbed playback,
      chapter overlays mapped to the footage.
      Visual system: tokens, Bricolage Grotesque + Inter Tight
-     (self-hosted), pixel-veil signature, film grain.
+     (self-hosted), soft cinematic dissolves, film grain.
      ============================================================ */
 
   @font-face {
@@ -62,19 +62,9 @@
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
   }
 
-  /* Pixel veil: signature transition (preloader exit) */
-  #pixel-veil {
-    position: fixed; inset: 0; z-index: 90; pointer-events: none;
-    display: grid;
-    grid-template-columns: repeat(20, 1fr);
-    grid-template-rows: repeat(12, 1fr);
-  }
-  #pixel-veil span {
-    background: var(--espresso);
-    opacity: 0; transform: scale(.92);
-    transition: opacity .2s var(--ease-cinema), transform .2s var(--ease-cinema);
-  }
-  #pixel-veil span.on { opacity: 1; transform: scale(1); }
+  /* Soft cinematic fade for the preloader exit — no black blocks,
+     no harsh cuts. The film is already behind it; the card simply
+     dissolves away with natural deceleration. */
 
   /* Film progress hairline */
   #progress {
@@ -239,14 +229,12 @@
 
   @media (prefers-reduced-motion: reduce) {
     html { scroll-behavior: auto; }
-    #pixel-veil { display: none; }
     #preloader .bar i { animation: none; }
   }
 </style>
 </head>
 <body>
 
-<div id="pixel-veil" aria-hidden="true"></div>
 <div id="progress" aria-hidden="true"></div>
 
 <!-- Preloader: title card -->
@@ -345,46 +333,6 @@
   var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   var hasGSAP = window.gsap && window.ScrollTrigger;
 
-  /* ============ Pixel veil (preloader exit) ============ */
-  var veil = document.getElementById("pixel-veil");
-  var COLS = 20, ROWS = 12, cells = [];
-  for (var r = 0; r < ROWS; r++) {
-    for (var c = 0; c < COLS; c++) {
-      var s = document.createElement("span");
-      s._row = r;
-      s._jitter = Math.random();
-      veil.appendChild(s);
-      cells.push(s);
-    }
-  }
-  function orderedCells(dir) {
-    return cells.slice().sort(function (a, b) {
-      var ra = dir === 1 ? a._row : -a._row;
-      var rb = dir === 1 ? b._row : -b._row;
-      if (ra !== rb) return ra - rb;
-      return a._jitter - b._jitter;
-    });
-  }
-  function veilPass(dir, add) {
-    return new Promise(function (resolve) {
-      var each = add ? 1.2 : 1.0;
-      orderedCells(dir).forEach(function (el, idx) {
-        el.style.transitionDelay = (idx * each) + "ms";
-        el.classList.toggle("on", add);
-      });
-      setTimeout(function () {
-        if (!add) cells.forEach(function (el) { el.style.transitionDelay = "0ms"; });
-        resolve();
-      }, add ? 530 : 470);
-    });
-  }
-  function veilWipe(dir) {
-    if (reduceMotion) return Promise.resolve();
-    return veilPass(dir || 1, true)
-      .then(function () { return new Promise(function (res) { setTimeout(res, 90); }); })
-      .then(function () { return veilPass(dir || 1, false); });
-  }
-
   /* ============ Preloader ============ */
   var preloader = document.getElementById("preloader");
   var dismissed = false;
@@ -393,7 +341,11 @@
     dismissed = true;
     unlockVideo();
     if (reduceMotion) { preloader.remove(); return; }
-    veilWipe(1).then(function () { preloader.remove(); });
+    /* Soft dissolve: the title card fades away over the film. */
+    preloader.style.transition = "opacity .8s cubic-bezier(.16, 1, .3, 1)";
+    preloader.style.opacity = "0";
+    preloader.style.pointerEvents = "none";
+    setTimeout(function () { preloader.remove(); }, 850);
   }
   preloader.addEventListener("click", dismissPreloader);
   preloader.addEventListener("keydown", function (e) {
